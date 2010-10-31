@@ -205,6 +205,8 @@
                           (> x b) (member? c x)
                           :else   true))
 
+
+
 ;;;; nullary constructors are actually pretty useful
 ;;;; perhaps its better to use a single type for a collection of
 ;;;; and add type tags

@@ -68,15 +68,20 @@
 
 (defn uid-map [xs] (apply sorted-map (interleave (range) xs)))
 
+(defn split-map [m ks]
+  [(select-keys m ks) (apply dissoc m ks)])
+
 (defn fold* [seeking alts]
   (into {}
     (for [[uid [head & tail]] alts
           :when (= seeking head)]
       [uid tail])))
 
-(defn fold-cases [case-map]
-  (let [top-id   (apply min (keys case-map))
-        alts     (dissoc case-map top-id)
+;;;
+
+(defn fold-cases* [case-map top-id]
+  (let [
+        alts     (apply dissoc case-map (range 0 top-id))
         [a & b]  (case-map top-id)
         similar  (fold* a alts)]
 
@@ -86,6 +91,18 @@
             case-map (apply dissoc case-map (keys similar))
             case-map (assoc case-map top-id leaf)]
         case-map))))
+
+;;;; okay, now first a top down fold
+
+(defn fold-cases [case-map]
+  (let [targets (keys case-map)]
+    (loop [case-map             case-map
+           [t & ts :as targets] targets]
+      (cond
+       (empty? targets) case-map
+       (case-map t)     (recur (fold-cases* case-map)))
+      (if (state t)
+        ()))))
 
 (defn compile-cases [cases]
   (let [pats       (uid-map (take-nth 2 cases))
