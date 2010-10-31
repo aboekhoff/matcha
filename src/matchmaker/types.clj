@@ -12,7 +12,7 @@
 
 (def CONSTRUCTOR_PREFIX "Structural")
 
-(defn accessor [i] (symbol (str PREFIX i)))
+(defn accessor [i] (symbol (str FIELD_PREFIX i)))
 
 (defn getter [arg] (fn [n i] `(defn ~n [~arg] (. ~arg ~i))))
 
@@ -167,7 +167,7 @@
 
 (defmacro define
   ([name value] `(def ~name ~value))
-  ([name body & body*] (parse-match-fn name (cons body body*))))
+  ([name body & body*] (compile-match-fn name (cons body body*))))
 
 (def cases
   '[[(Pair a (Pair b c)) (+ a b c)]
