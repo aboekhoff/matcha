@@ -53,6 +53,11 @@
   (apply str (cons (.toUpperCase (str (first s))) (rest s))))
 
 
+(defn raise! [& msg]
+  (throw (Exception.
+          (binding [*print-length* 10]
+            (apply str msg)))))
+
 (defn ordinalize [n]
   (if (zero? n)
     (raise! "can't ordinalize zero")
@@ -62,11 +67,6 @@
                    \2 "nd"
                    \3 "rd")]
       (str prefix n suffix))))
-
-(defn raise! [& msg]
-  (throw (Exception.
-          (binding [*print-length* 10]
-            (apply str msg)))))
 
 (def o comp)
 

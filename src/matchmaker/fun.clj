@@ -1,16 +1,18 @@
 (ns matchmaker.fun
   (:refer-clojure :exclude [struct accessor])
-  (:use [matchmaker.curry :only [deflambda lambda]]))
+  (:use matchmaker.core))
 
-(deflambda foldl [f x xs]
+(define (foldl f x xs)
   (reduce f x xs))
 
-(deflambda foldr [f xs x]
+(define (foldr f xs x)
   (let [xs* (reverse xs)]
     (reduce (fn [x y] (f y x)) x xs*)))
 
-(deflambda unfoldl [f x]
-  (when-let [y (f x)] (cons x (unfoldl f y))))
+(define (unfoldl f x)
+  (lazy-seq
+   (when-let [y (f x)] (cons x (unfoldl f y)))))
 
-(deflambda unfoldr [f x]
-  (reverse (unfoldl f x)))
+(define (eq? x y) (= x y))
+
+(define (not-eq? x y) (not= x y))

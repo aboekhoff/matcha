@@ -37,6 +37,8 @@
 
 (deflambda not-eq? [x y] (not= x y))
 
+(defn ignore? [x] (= x '_))
+
 (defn choose [test yes no]
   `(if ~test ~yes ~no))
 
@@ -68,7 +70,7 @@
     (assoc data :tag tag)))
 
 (defn check-type [t javatype tag]
-  `(and (instance? ~t ~javatype)
+  `(and (instance? ~javatype ~t)
         (= (. ~t ~TAG) ~tag)))
 
 (defn parse-vector [v]
@@ -81,6 +83,7 @@
 
 (deflambda match-pattern [t p yes no]
   (condp call p
+    ignore?      yes
     predicate?   (choose `(~p ~t) yes no)
     variable?    `(let [~p ~t] ~yes)
     constructor? (match-nullary t p yes no)
@@ -124,7 +127,7 @@
   (let [[ps op len restpat] (parse-vector p)
         ps* (match-indexed t ps)]
     (choose
-     `(and (sequential? ~t) (~op ~len (count ~t)))
+     `(and (sequential? ~t) (~op (count ~t) ~len))
      (if restpat
        (ps* (match-rest t restpat len yes no) no)
        (ps* yes no))
@@ -197,12 +200,11 @@
       [(list a) xs])))
 
 (defn <-where [xs]
-  (if (and (= 1 (count xs))
-           (= 'where (first xs)))
-    [(rest (first xs)) xs]
+  (if (and (= 1 (count xs)))
+    (let [[a & b] (first xs)]
+      (err-when (not= 'where a))
+      [b nil])
     [nil xs]))
-
-;;;; parser should confirm arity is okay and put arity in map
 
 (defn parse [xs]
   (let [[cases xs] (<-cases xs)
@@ -214,10 +216,9 @@
 ;;;; begin compiler
 
 (deflambda compile-pattern
-  "designed to take its target arguments last"
   [ps yes no ts]
-  (let [ps* (map #(match-pattern %1 %2 yes) ts ps)]
-    (foldr call ps* no)))
+  (let [ps* (map match-pattern ts ps)]
+    (foldr #(%1 %2 no) (butlast ps*) ((last ps*) yes no))))
 
 (defn compile-yes [idx action guard]
   (or action
@@ -230,6 +231,7 @@
         no  `(recur ~(inc idx))]
     (compile-pattern pattern yes no ts)))
 
+;;;; pretty error messages shoud be generated here
 (deflambda compile-cases*
   "the function most resembling an entry point into the compiler"
   [cases targets]
@@ -243,10 +245,29 @@
 
 ;;;; need to inspect cases to ensure args are properly matched
 
-(deflambda compile-pattern-matcher [cases targets]
+(defn validate-patterns! [arity cases]
+  (let [lens (map (comp count :pattern second) cases)
+        test (if (= 1 arity)
+               #(every? (eq? arity) %)
+               #(apply = %))]
+    (when-not (test lens)
+      (raise! "syntax error: unbalanced pattern parameters"))))
+
+(defn estimate-arity [cases]
+  (count (take-while (o not delim?) cases)))
+
+(deflambda compile-pattern-matcher [arity targets cases]
   (let [{:keys [cases where]} (parse cases)
         matcher (compile-cases* cases targets)]
+    (validate-patterns! arity cases)
     (if where `(let [~@where] ~matcher) matcher)))
+
+
+
+;;;; match and functions
+;;;; for more efficiency can proceed down the
+;;;; arguments one pattern at a time
+
 
 ;;     [(apply merge maps) matchers]
 

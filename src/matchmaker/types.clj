@@ -14,18 +14,20 @@
 
 ;;;; helpers
 
-(defn variable? [x]
-  (and (symbol? x) (lowercase? (first (name x)))))
-
 (defn constructor? [x]
   (and (symbol? x) (uppercase? (first (name x)))))
 
 (defn predicate? [x]
   (and (symbol? x) (= \? (last (name x)))))
 
+(defn variable? [x]
+  (and (symbol? x)
+       (not (constructor? x))
+       (not (predicate? x))))
+
 (defn fieldname [i] (symbol (str FIELD_PREFIX i)))
 
-(defn fieldnames [n] (map accessor (range n)))
+(defn fieldnames [n] (map fieldname (range n)))
 
 (defn projections [target fields]
   (for [f fields] `(. ~target ~f)))
@@ -60,17 +62,16 @@
 
 (defn- gen-nullary [javatype cname tag actual-arity]
   (let [nils  (repeat actual-arity nil)
-        cname (with-meta cname {::javatype javatype
-                                ::ADT true
+        cname (with-meta cname {::ADT true
                                 ::arity 0})]
-    `(def ~cname (new ~javatype ~tag ~@nils nil))))
+    `(do (def ~cname (new ~javatype ~tag ~@nils nil))
+         (alter-meta! (var ~cname) assoc ::javatype ~javatype))))
 
 (defn- gen-constructor*
   [javatype cname tag actual-arity fields]
   (let [arity (count fields)
         meta  {:arglists (list (vec fields))
                ::arity arity
-               ::javatype javatype
                ::ADT true}
         args  (for [_ fields] (gensym))
         args* (concat args (repeat (- actual-arity arity) nil))
@@ -78,7 +79,8 @@
         func  `(lambda [~@args]
                  ~@(gen-assertions fields args)
                  (new ~javatype ~tag ~@args* nil))]
-    `(intern *ns* (quote ~cname) ~func)))
+    `(do (intern *ns* (quote ~cname) ~func)
+         (alter-meta! (var ~cname) assoc ::javatype ~javatype))))
 
 (defn- gen-constructor [j c t a f]
   (if (empty? f)
