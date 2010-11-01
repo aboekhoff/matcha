@@ -13,7 +13,7 @@
 
 (defn curry [args body]
   (let [func  (gensym)
-        body* `(fn [] ~@body)
+        body* `(fn [~@args] ~@body)
         call  `(~func ~@args)]
     `(let [~func ~body*] ~(curry* args call))))
 
