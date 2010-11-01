@@ -6,6 +6,12 @@
 (defn foldr [f xs x]
   (reduce (fn [x y] (f y x)) x (reverse xs)))
 
+(defn unzip [xs]
+  [(map first xs) (map rest xs)])
+
+(defn map-keys [f m]
+  (into {} (for [[k v] m] [(f k) v])))
+
 (defn pipeline* [as steps]
   (if-let [[a b & more] (seq steps)]
     `(let [~as (if ~a ~b ~as)]

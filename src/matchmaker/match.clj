@@ -1,6 +1,6 @@
 (ns matchmaker.match
   (:use [matchmaker.misc :only
-         [call foldr raise! << o ordinalize letters]]
+         [call foldr raise! << o ordinalize letters unzip map-keys]]
         [matchmaker.curry :only [lambda deflambda]]
         [matchmaker.types :only
          [variable? predicate? constructor? TAG projections
@@ -126,12 +126,7 @@
 
 (def match-fields (match-projections nth-field))
 
-;;;; so far so good
-;;;; now we need to parse the initial cases
-;;;; functions are really no different, we just fold across
-;;;; the arguments before linking the cases
-
-(declare parse-ps parse-fender parse-guards parse-case parse-cases)
+;;;; begin parser
 
 (def delim?  '#{-> |})
 (def arrow?  (eq? '->))
@@ -143,7 +138,7 @@
   ([] (err "pattern syntax error"))
   ([e] (raise! e)))
 
-(defn err-when [e] (when e (err)))
+(defn err-when [e & msg] (when e (apply err msg)))
 
 (defn <-pat [xs]
   (err-when (empty? xs))
@@ -180,10 +175,10 @@
 
 (defn <-cases [xs]
   (let [[a xs] (<-case xs)]
-    (if (> (count xs) 2)
-      (let [[b xs] (<-case xs)]
-        [(cons a (list b)) xs])
-      [a xs])))
+    (if (> (count xs) 1)
+      (let [[b xs] (<-cases xs)]
+        [(cons a b) xs])
+      [(list a) xs])))
 
 (defn <-where [xs]
   (if (and (= 1 (count xs))
@@ -191,8 +186,22 @@
     [(rest (first xs)) xs]
     [nil xs]))
 
+(defn parse [xs]
+  (let [[cases xs] (<-cases xs)
+        [where xs] (<-where xs)]
+    (err-when (seq xs))
+    {:cases (indexed cases) :where where}))
+
+;;;; end parser
+;;;; begin compiler
+
+(defn ->loc [x]
+  (if (number? x) (keyword (str x)) x))
+
 (defn compile-action [idx action]
-  [{idx action} `(recur true ~idx) `(recur false ~(inc idx))])
+  [{idx action}
+   `(recur true ~idx)
+   `(recur false ~(->loc (inc idx)))])
 
 (deflambda subindex [a b]
   (keyword (str a (str (letters b)))))
@@ -203,73 +212,61 @@
         idxs (range (count guard))
         ks   (map subindex (repeat idx) idxs)
         jmps (for [k ks] `(recur true ~k))
-        fail `(recur false ~(inc idx))
-        tail `(cond ~@(interleave tsts jmps) ~fail)]
+        fail `(recur false ~(->loc (inc idx)))
+        tail `(cond ~@(interleave tsts jmps) :else ~fail)]
     [(zipmap ks acts) tail]))
 
-(deflambda normalize-patterns [ps yes no ts]
+(deflambda compile-pattern
+  "designed to take its target arguments last"
+  [ps yes no ts]
   (let [ps* (map #(match-pattern %1 %2 yes) ts ps)]
     (foldr call ps* no)))
 
-(defn normalize-case [])
+(deflambda compile-tail [idx guard action]
+  (if guard
+    (compile-guard idx guard)
+    (compile-action idx action)))
 
+(defn compile-case
+  [[idx {:keys [pattern guard action] :as map}]]
+  (let [[locs tail] (compile-tail idx guard action)
+        no `(recur false ~(inc idx))
+        matcher (compile-pattern pattern tail no)]
+    [matcher locs]))
 
-
-
-(defn compile-1 [idx {:keys [pattern action guard]}]
+(deflambda compile-cases
+  "the function most resembling an entry point into the compiler"
+  [cases targets]
+  (let [{:keys [cases where]} (parse cases)
+        [matchers locs] (unzip (map compile-case cases))
+        fail-idx (->loc (count cases))
+        failure `(raise! "pattern match failure")
+        dispatch (->> locs
+                      (apply concat)
+                      (apply merge)
+                      (map-keys ->loc)
+                      (merge {fail-idx failure}))
+         matchers (for [m matchers] (m targets))]
+    [matchers dispatch]
   
-  ())
+    ))
 
-(defn parse [xs]
-  (let [[cases xs] (<-cases xs)
-        [where xs] (<-where xs)]
-    (err-when (seq xs))
-    {:cases (indexed cases) :where where}))
+;;     [(apply merge maps) matchers]
 
-(defn prepare-pattern [idx pats]
-  (err-when (not (apply = (map count pats))))
-  )
+;; compile one case
+;; want to produce a function that takes a target
+;; we get yes no from the action/guard
+;; we foldr onto the last jump
+;; and then finally apply the target arguments
 
-(defn process [{:keys [cases where]}]
-  ())
-
-
-
-;;;;
-
-(deflambda build-matcher [t p i]
-  (match-pattern t p `(recur true ~i) `(recur false (inc ~i))))
-
-(deflambda build-action [action idx]
-  {(keyword (str idx)) action})
+(def c0
+     '[x y "+" -> (+ x y)
+       x y "-" -> (- x y)
+       x y "*" -> (* x y)
+       x y "/"  | (zero? x) (raise! "naughty!")
+                | :else     (/ x y)])
 
 
-
-(deflambda build-guard [test x y]
-  `(if ~test (recur true ~x) ~y))
-
-(deflambda build-guards* [i gs]
-  (for [[i* [t a]] (indexed gs)]
-    (let [k (subindex i i*)
-          t (build-guard t k)
-          a {k a}]
-      [t a])))
-
-(deflambda build-guards [i gs]
-  (let [pairs (build-guards* i gs)
-        fns   (map first pairs)
-        cases (apply merge (map second pairs))
-        fail  `(recur false ~(inc i))
-        tail  (foldr call fns fail)]
-    [tail cases]))
-
-
-
-
-
-
-(defn build-dispatch [xs]
-  (let [pairs (parse-cases xs)]))
 
 (comment
   (defn parse-guards [acc [x y z & more :as all]]
