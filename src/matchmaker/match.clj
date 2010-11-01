@@ -186,6 +186,8 @@
     [(rest (first xs)) xs]
     [nil xs]))
 
+;;;; parser should confirm arity is okay and put arity in map
+
 (defn parse [xs]
   (let [[cases xs] (<-cases xs)
         [where xs] (<-where xs)]
@@ -195,61 +197,40 @@
 ;;;; end parser
 ;;;; begin compiler
 
-(defn ->loc [x]
-  (if (number? x) (keyword (str x)) x))
-
-(defn compile-action [idx action]
-  [{idx action}
-   `(recur true ~idx)
-   `(recur false ~(->loc (inc idx)))])
-
-(deflambda subindex [a b]
-  (keyword (str a (str (letters b)))))
-
-(defn compile-guard [idx guard]
-  (let [tsts (map first guard)
-        acts (map second guard) 
-        idxs (range (count guard))
-        ks   (map subindex (repeat idx) idxs)
-        jmps (for [k ks] `(recur true ~k))
-        fail `(recur false ~(->loc (inc idx)))
-        tail `(cond ~@(interleave tsts jmps) :else ~fail)]
-    [(zipmap ks acts) tail]))
-
 (deflambda compile-pattern
   "designed to take its target arguments last"
   [ps yes no ts]
   (let [ps* (map #(match-pattern %1 %2 yes) ts ps)]
     (foldr call ps* no)))
 
-(deflambda compile-tail [idx guard action]
-  (if guard
-    (compile-guard idx guard)
-    (compile-action idx action)))
+(defn compile-yes [idx action guard]
+  (or action
+      `(cond ~@(apply concat guard)
+             :else (recur ~(inc idx)))))
 
 (defn compile-case
-  [[idx {:keys [pattern guard action] :as map}]]
-  (let [[locs tail] (compile-tail idx guard action)
-        no `(recur false ~(inc idx))
-        matcher (compile-pattern pattern tail no)]
-    [matcher locs]))
+  [[idx {:keys [pattern guard action]}] ts]
+  (let [yes (compile-yes idx action guard)
+        no  `(recur ~(inc idx))]
+    (compile-pattern pattern yes no ts)))
 
-(deflambda compile-cases
+(deflambda compile-cases*
   "the function most resembling an entry point into the compiler"
   [cases targets]
+  (let [matchers (map compile-case cases (repeat targets))
+        fail-at  (count cases)
+        failure  `(raise! "pattern match failure")
+        dispatch (interleave (range fail-at) matchers)
+        dispatch `(loop [pattern# 0]
+                    (case pattern# ~@dispatch ~failure))]
+    dispatch))
+
+;;;; need to inspect cases to ensure args are properly matched
+
+(deflambda compile-pattern-matcher [cases targets]
   (let [{:keys [cases where]} (parse cases)
-        [matchers locs] (unzip (map compile-case cases))
-        fail-idx (->loc (count cases))
-        failure `(raise! "pattern match failure")
-        dispatch (->> locs
-                      (apply concat)
-                      (apply merge)
-                      (map-keys ->loc)
-                      (merge {fail-idx failure}))
-         matchers (for [m matchers] (m targets))]
-    [matchers dispatch]
-  
-    ))
+        matcher (compile-cases* cases targets)]
+    (if where `(let [~@where] ~matcher) matcher)))
 
 ;;     [(apply merge maps) matchers]
 
@@ -264,9 +245,12 @@
        x y "-" -> (- x y)
        x y "*" -> (* x y)
        x y "/"  | (zero? x) (raise! "naughty!")
-                | :else     (/ x y)])
+       | :else     (/ x y)])
 
-
+(def c1 '[[1 2 c]       -> 42
+          [3 b 7]       -> :woot
+          [:green :red] -> :shazam]
+     )
 
 (comment
   (defn parse-guards [acc [x y z & more :as all]]
