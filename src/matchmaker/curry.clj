@@ -27,6 +27,10 @@
   [args & body]
   (curry args body))
 
+;;;; will replace this with a single polymorphic
+;;;; define form in core, it sure was handy while
+;;;; writing the first compiler though.
+
 (defmacro deflambda
   "defines a curried lambda astraction"
   [name & body]
