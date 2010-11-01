@@ -17,6 +17,22 @@
          match-fields match-indexed
          match-projection match-projections)
 
+;;;; it should be possible to implement full regular expression
+;;;; parsing with this thing
+;;;; damn, maybe we should keep this to ourselves for a bit
+;;;; (:! ...) (:+ ...) (:* ...) (:or ...) (:as ...)
+
+(defmulti match-special
+  "extension point for adding syntax to the pattern matcher.
+   dispatch value must be a keyword.
+   The multifn must be a function of four arguments:
+   1. the full form (dispatch keyword & arguments)
+   2. the current parameter
+   3. the match-success continuation (yes).
+   4. the match-failure continuation (no).
+   The return value will be inserted in tail position."
+  (fn [form target yes no] (first form)))
+
 (deflambda eq? [x y] (= x y))
 
 (deflambda not-eq? [x y] (not= x y))
@@ -48,7 +64,7 @@
   (let [tag  (keyword sym)
         data (type-metadata (resolve sym))]
     (when-not (:ADT data)
-      (raise! sym " is not an ADT cnst"))
+      (raise! sym " is not an ADT constructor"))
     (assoc data :tag tag)))
 
 (defn check-type [t javatype tag]
@@ -85,7 +101,7 @@
                       `(~head ~t)
                       `(let [~(first tail) ~t] ~yes)
                       no))
-      keyword?     (match-special t head tail yes no)
+      keyword?     (match-special head t tail yes no)
       (malformed-error p))))
 
 (deflambda match-nullary [t c yes no]
@@ -221,8 +237,8 @@
         fail-at  (count cases)
         failure  `(raise! "pattern match failure")
         dispatch (interleave (range fail-at) matchers)
-        dispatch `(loop [pattern# 0]
-                    (case pattern# ~@dispatch ~failure))]
+        dispatch `(loop [goto# 0]
+                    (case goto# ~@dispatch ~failure))]
     dispatch))
 
 ;;;; need to inspect cases to ensure args are properly matched
