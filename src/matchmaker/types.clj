@@ -93,6 +93,7 @@
         cases (for [[k v] tagmap
                     :let [n (name k)
                           p (projections this (fieldnames v))
+                          p (map (fn [x] `(pr-str ~x)) p)
                           p (interpose " " (cons n p))]]
                 (if (zero? v)
                   [k n] [k `(str "(" ~@p ")")]))]

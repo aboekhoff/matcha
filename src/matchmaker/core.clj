@@ -14,7 +14,6 @@
     `(curry/lambda [~@args]
        ~(match/compile-pattern-matcher nil args cases))))
 
-
 (defmacro define [name & form]
   "three methods of use:
    define foo bar     => def foo bar
@@ -39,46 +38,62 @@
 
 (define (match-predicate args param yes no)
   (match args
-    [p]   -> (match/choose `(~p ~param) yes no)
-    [p v] -> (match/choose `(~p ~param) `(let [~v ~param] ~yes) no)))
+    [p & extra] -> `(if (~p ~@extra ~param) ~yes ~no)))
 
 (define (match-as args param yes no)
   (match args
     [a b] -> `(let [~a ~param]
-                ~(match/match-pattern b param yes no))
-    [a b & c] -> (match-as [a (cons b c)] param yes no)))
+                ~(match/match-pattern param b yes no))))
 
 (define (match-and args param yes no)
   (match args
     []       -> yes
     [x & xs] -> (let [yes* (match-and xs param yes no)]
-                  (match/match-pattern x param yes* no))))
+                  (match/match-pattern param x yes* no))))
 
 (define (match-or args param yes no)
   (match args
     [] -> no
     [x & xs] -> (let [no* (match-or xs param yes no)]
-                  (match/match-pattern x param yes no*))))
+                  (match/match-pattern param x yes no*))))
 
 (define (match-spy args param yes no)
   (match args
     [x] -> `(do (prn ~param)
                 ~(match/match-pattern param x yes no))))
 
-(defmethod match/match-special :?
+(define (match-thread-first args param yes no)
+  (match args
+    [pat expr] -> (let [tmp (gensym)]
+                    `(let [~tmp (-> ~param ~expr)]
+                       ~(match/match-pattern tmp pat yes no)))))
+
+(define (match-thread-last args param yes no)
+  (match args
+    [pat expr] -> (let [tmp (gensym)]
+                    `(let [~tmp (->> ~param ~expr)]
+                       ~(match/match-pattern tmp pat yes no)))))
+
+(defmethod match/match-special '?
   [_] match-predicate)
 
-(defmethod match/match-special :as
+(defmethod match/match-special 'as
   [_] match-as)
 
-(defmethod match/match-special :or
+(defmethod match/match-special 'or
   [_] match-or)
 
-(defmethod match/match-special :and
+(defmethod match/match-special 'and
   [_] match-and)
 
-(defmethod match/match-special :spy
+(defmethod match/match-special 'spy
   [_] match-spy)
+
+(defmethod match/match-special '->
+  [_] match-thread-first)
+
+(defmethod match/match-special '->>
+  [_] match-thread-last)
 
 ;;;; and maybe a more useful one
 ;;;; an :as pattern

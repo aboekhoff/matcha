@@ -5,7 +5,8 @@
         [matchmaker.types :only
          [variable? predicate? constructor? TAG projections
           fieldname fieldnames type-metadata define-type]]
-        [clojure.pprint :only [pprint]]))
+        [clojure.pprint :only [pprint]])
+  (:require [clojure.string :as str]))
 
 ;;;; ok, now lets make a naive pattern matcher that only
 ;;;; understands literals, variables, and structs
@@ -24,7 +25,7 @@
 
 (defmulti match-special
   "extension point for adding syntax to the pattern matcher.
-   dispatch value must be a keyword.
+   dispatch value must be a symbol.
    The multifn must return a curried function of four arguments:
    1. the tail of the form 
    2. the current parameter
@@ -102,13 +103,7 @@
       constructor? (if (empty? tail)
                      (match-nullary t head yes no)
                      (match-n-ary t head tail yes no))
-      predicate?   (if-not (= 1 (count tail))
-                     (malformed-error p)
-                     (choose
-                      `(~head ~t)
-                      `(let [~(first tail) ~t] ~yes)
-                      no))
-      keyword?     (do ((match-special head) tail t yes no))
+      symbol?      (do ((match-special head) tail t yes no))
       (malformed-error p))))
 
 (deflambda match-nullary [t c yes no]
@@ -237,13 +232,21 @@
         no  `(recur ~(inc idx))]
     (compile-pattern (:pattern map) yes no ts)))
 
-;;;; pretty error messages shoud be generated here
+(defn build-pretty-error [cases symbols]
+  (let [cases* (for [[_ c] cases]
+                 (str/join " " (map pr-str (:pattern c))))
+        syms   (interpose " " (for [s symbols] `(pr-str ~s)))
+        pats   (apply str (interpose "\n" cases*))]
+    `(let [val# (str ~@syms)]
+       (raise! "no matching pattern found for " val#
+               " among patterns:\n" ~pats))))
+
 (deflambda compile-cases*
   "the function most resembling an entry point into the compiler"
   [cases targets]
   (let [matchers (map compile-case cases (repeat targets))
         fail-at  (count cases)
-        failure  `(raise! "pattern match failure")
+        failure  (build-pretty-error cases targets)
         dispatch (interleave (range fail-at) matchers)
         dispatch `(loop [goto# 0]
                     (case goto# ~@dispatch ~failure))]
@@ -269,150 +272,3 @@
     (if where `(let [~@where] ~matcher) matcher)))
 
 
-
-;;;; match and functions
-;;;; for more efficiency can proceed down the
-;;;; arguments one pattern at a time
-
-
-;;     [(apply merge maps) matchers]
-
-;; compile one case
-;; want to produce a function that takes a target
-;; we get yes no from the action/guard
-;; we foldr onto the last jump
-;; and then finally apply the target arguments
-
-(def c0
-     '[x y "+" -> (+ x y)
-       x y "-" -> (- x y)
-       x y "*" -> (* x y)
-       x y "/"  | (zero? x) (raise! "naughty!")
-       | :else     (/ x y)])
-
-(def c1 '[[1 2 c]       -> 42
-          [3 b 7]       -> :woot
-          [:green :red] -> :shazam]
-     )
-
-(comment
-  (defn parse-guards [acc [x y z & more :as all]]
-    (cond
-     (bar? x) (recur (conj acc [y z]) more)
-     :else    [[:GUARD (vec (apply concat acc))] all]))
-
-  (defn parse-case [xs]
-    (let [[ps xs]     (parse-ps xs)
-          [fender xs] (parse-fender xs)]
-      [[ps fender] xs]))
-
-  (defn parse-cases* [acc xs]
-    (let [[case xs] (parse-case xs)
-          acc       (conj acc case)]
-      (if (< (count xs) 2)
-        [acc xs]
-        (recur acc xs))))
-
-  (defn parse-cases [xs]
-    (let [[cases rem] (parse-cases* [] xs)]
-      (cond
-       (empty? rem) cases
-       (where? rem) [:WHERE (rest (first xs)) cases]
-       :else        (syntax-error!))))
-
-  (defn build-matcher [t p index]
-    (match-pattern t p (jump index))))
-
-
-
-(def cases0
-     '[:foo -> 42
-       :bar -> 21])
-
-(comment
-
-  (define-type pair Nil (Cons car cdr))
-  
-;;;;
-
-  (defmacro match
-    [t & cases]
-    (parse-pterns t cases))
-
-  (defmacro define
-    ([name value] `(def ~name ~value))
-    ([name body & body*] (compile-match-fn name (cons body body*))))
-
-  (def cases
-       '[[(Pair a (Pair b c)) (+ a b c)]
-         [(Pair (Pair a b) c) (* a b c)]])
-
-  (def f0
-       '[(Pair (Pair a b) c) -> (+ a b c)
-         (Pair a (Pair b c)) -> (* a b c)])
-
-  (define-struct Pair car cdr)
-
-  (define add-pair
-    (Pair a b) (Pair c d) -> (Pair (f a c) (g b d))
-    (where f * g *))
-
-  (define-struct leaf value)
-  (define-struct node left elt right)
-
-  (define insert
-    nil      x -> (leaf x)
-    (leaf a) x -> (cond (or (nil? a) (= a x)) (leaf a)
-                        (< x a) (node (leaf x) a nil)
-                        (< a x) (node (leaf a) x nil))
-  
-    (node a b c) x -> (cond (< x b) (node (insert a x) b c)
-                            (= x b) (node a b c)
-                            (> x b) (node a b (insert c x))))
-
-  (define member?
-    nil _          -> false
-    (leaf a) x     -> (= a x)
-    (node a b c) x -> (cond (< x b) (member? a x)
-                            (> x b) (member? c x)
-                            :else   true))
-
-
-
-;;;; nullary cnsts are actually pretty useful
-;;;; perhaps its better to use a single type for a collection of
-;;;; and add type tags
-;;;; then just create unique instances without helper functions
-;;;; for nullary cnsts
-
-;;;; centralizing the type to a single class would also make them
-;;;; easier to use with protocols,
-
-;;;; a richer representation would be to create an IStrucuturalType
-;;;; it would yes noain its unique Type tag and its set of
-;;;; Type-Cnst tags
-;;;; all type instances would yes noain the parent Type tag, and their
-;;;; unique Type-Cnst tag
-
-;;;; how to do this?
-
-;;;; (define-type (Tree a) 
-;;;;   Empty
-;;;;   (Leaf a)
-;;;;   (Node (Tree a) (Tree a)))
-;;;;
-;;;; ISeq
-;;;; ...
-
-;;;; we create a deftype for the ADT
-;;;; it has the fields: type cnst index_0 ... index_N
-;;;; we create functions to implement each cnst
-;;;; we put the type metadata on each cnst
-;;;; so that the ptern matcher can get access to type metadata
-;;;; for nullary cnsts, we create a single instance 
-;;;; also allow implementations in the declaration
-
-;;;; accept predicates/type variables?
-;;;; I think its possible, but for the moment, lets restrict ourselves
-;;;; to a usable implementation of unions without type checking
-)
