@@ -34,3 +34,54 @@
 (defmacro define-ADT [name & specs]
   `(types/define-type ~name ~@specs))
 
+;;;; now the fun begins
+;;;; we can extend the matcher using the matcher
+
+(define (match-predicate args param yes no)
+  (match args
+    [p]   -> (match/choose `(~p ~param) yes no)
+    [p v] -> (match/choose `(~p ~param) `(let [~v ~param] ~yes) no)))
+
+(define (match-as args param yes no)
+  (match args
+    [a b] -> `(let [~a ~param]
+                ~(match/match-pattern param b yes no))
+    [a b & c] -> (match-as [a (cons b c)] param yes no)))
+
+(define (match-and args param yes no)
+  (match args
+    []       -> yes
+    [x & xs] -> (let [yes* (match-and xs param yes no)]
+                  (match/match-pattern x param yes* no))))
+
+(define (match-or args param yes no)
+  (match args
+    [] -> no
+    [x & xs] -> (let [no* (match-or xs param yes no)]
+                  (match/match-pattern x param yes no*))))
+
+(define (match-spy args param yes no)
+  (match args
+    [x] -> `(do (prn ~param)
+                ~(match/match-pattern param x yes no))))
+
+(defmethod match/match-special :?
+  [_] match-predicate)
+
+(defmethod match/match-special :as
+  [_] match-as)
+
+(defmethod match/match-special :or
+  [_] match-or)
+
+(defmethod match/match-special :and
+  [_] match-and)
+
+(defmethod match/match-special :spy
+  [_] match-spy)
+
+;;;; and maybe a more useful one
+;;;; an :as pattern
+
+
+

@@ -25,13 +25,17 @@
 (defmulti match-special
   "extension point for adding syntax to the pattern matcher.
    dispatch value must be a keyword.
-   The multifn must be a function of four arguments:
-   1. the full form (dispatch keyword & arguments)
+   The multifn must return a curried function of four arguments:
+   1. the tail of the form 
    2. the current parameter
    3. the match-success continuation (yes).
    4. the match-failure continuation (no).
-   The return value will be inserted in tail position."
-  (fn [form target yes no] (first form)))
+   The result of applying the returned function to the above arguments
+   will be inserted in tail position."
+  identity)
+
+(defmethod match-special :default
+  [_] (raise! "unknown operator"))
 
 (deflambda eq? [x y] (= x y))
 
@@ -104,7 +108,7 @@
                       `(~head ~t)
                       `(let [~(first tail) ~t] ~yes)
                       no))
-      keyword?     (match-special head t tail yes no)
+      keyword?     (do ((match-special head) tail t yes no))
       (malformed-error p))))
 
 (deflambda match-nullary [t c yes no]
@@ -126,12 +130,13 @@
 (deflambda match-sequential [t p yes no]
   (let [[ps op len restpat] (parse-vector p)
         ps* (match-indexed t ps)]
-    (choose
-     `(and (sequential? ~t) (~op (count ~t) ~len))
-     (if restpat
-       (ps* (match-rest t restpat len yes no) no)
-       (ps* yes no))
-     no)))
+    (if (empty? p)
+      (choose `(empty? ~t) yes no)
+      (choose `(and (sequential? ~t) (~op (count ~t) ~len))
+       (if restpat
+         (ps* (match-rest t restpat len yes no) no)
+         (ps* yes no))
+       no))))
 
 (deflambda match-projection [accessor index t p yes no]
   (project (accessor t index) #(match-pattern % p yes no)))
@@ -220,16 +225,17 @@
   (let [ps* (map match-pattern ts ps)]
     (foldr #(%1 %2 no) (butlast ps*) ((last ps*) yes no))))
 
-(defn compile-yes [idx action guard]
-  (or action
-      `(cond ~@(apply concat guard)
-             :else (recur ~(inc idx)))))
+(defn compile-yes [idx map]
+  (if (contains? map :action)
+    (:action map)
+    `(cond ~@(apply concat (:guard map))
+           :else (recur ~(inc idx)))))
 
 (defn compile-case
-  [[idx {:keys [pattern guard action]}] ts]
-  (let [yes (compile-yes idx action guard)
+  [[idx map] ts]
+  (let [yes (compile-yes idx map)
         no  `(recur ~(inc idx))]
-    (compile-pattern pattern yes no ts)))
+    (compile-pattern (:pattern map) yes no ts)))
 
 ;;;; pretty error messages shoud be generated here
 (deflambda compile-cases*
