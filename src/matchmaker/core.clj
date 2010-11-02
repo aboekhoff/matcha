@@ -45,7 +45,7 @@
 (define (match-as args param yes no)
   (match args
     [a b] -> `(let [~a ~param]
-                ~(match/match-pattern param b yes no))
+                ~(match/match-pattern b param yes no))
     [a b & c] -> (match-as [a (cons b c)] param yes no)))
 
 (define (match-and args param yes no)
