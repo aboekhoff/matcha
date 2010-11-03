@@ -11,6 +11,7 @@
 (def TYPE_PREFIX  "Structural")
 (def TAG          'structural_tag)
 (def META         'metadata)
+(def HASH_CODE    'computed_hash_code)
 
 ;;;; helpers
 
@@ -89,7 +90,6 @@
 
 (defn- gen-to-string [tagmap]
   (let [this   'this
-        writer 'writer
         cases (for [[k v] tagmap
                     :let [n (name k)
                           p (projections this (fieldnames v))
@@ -98,6 +98,47 @@
                 (if (zero? v)
                   [k n] [k `(str "(" ~@p ")")]))]
     `(~'toString [~this] (case (. ~this ~TAG) ~@(apply concat cases)))))
+
+(defn- gen-hash-string [javatype tag arity this]
+  (let [fields  (fieldnames arity)
+        projs   (projections this fields)
+        names   (for [[f p] (map vector fields projs)]
+                  `(~(str f) ":" (.hashCode ~p)))
+        names   (apply concat (interpose ["::"] (cons [tag] names)))]
+    `(str ~(name javatype) "::" ~@names)))
+
+(defn- gen-hash-code* [this javatype tagmap]
+  (let [tagsym 'tag
+        cases   (for [[tag arity] tagmap]
+                  [tag (gen-hash-string javatype tagsym arity this)])]
+    `(let [~tagsym (. ~this ~TAG)]
+       (.hashCode (case ~tagsym ~@(apply concat cases))))))
+
+(defn- gen-hash-code [javatype tagmap]
+  (let [this 'this
+        hash `(. ~this ~HASH_CODE)]
+    `(~'hashCode [this#]
+         (let [code# ~hash]
+           (or code#
+               (let [code# ~(gen-hash-code* this javatype tagmap)]
+                 (locking ~hash
+                   (set! ~this ~HASH_CODE code#))
+                 code#))))))
+
+(defn- gen-equals* [this that arity]
+  (let [fields (fieldnames arity)
+        pairs  (map list
+                    (projections this fields)
+                    (projections that fields))]
+    (for [[a b] pairs]
+      `(.equals ~a ~b))))
+
+(defn- gen-equals [javatype arity]
+  (let [this 'this that 'that]
+    `(equals [~this ~that]
+       (and (instance? ~javatype ~that)
+            (== (.hashCode ~this) (.hashCode ~that))
+            ~@(gen-equals* this that arity)))))
 
 (defn- gen-type* [type javatype arity tagmap]
   (let [pred     (symbol (str type "?"))
