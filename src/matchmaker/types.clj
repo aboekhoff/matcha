@@ -5,7 +5,12 @@
   (:use matchmaker.misc
         [matchmaker.curry :only [lambda deflambda]]))
 
-;;;; magic strings
+;;;; almost went with defrecord to get hashcode and equals for free
+;;;; but bit the bullet and implemented it independently
+;;;; the main reason is that, since defrecords can freely flow into
+;;;; maps they aren't really alegbraic types
+
+;;;; magic strings/symbols
 
 (def FIELD_PREFIX "structural_field_")
 (def TYPE_PREFIX  "Structural")
@@ -36,6 +41,9 @@
 
 (def metakeys {:javatype ::javatype
                :ADT      ::ADT})
+
+;;;; to make it more convenient for the pattern matcher
+;;;; to get metadata off the factory-function-vars
 
 (defn type-metadata [target]
   (let [target* (meta target)]
@@ -138,9 +146,10 @@
 (defn- gen-equals [javatype arity]
   (let [this 'this that 'that]
     `(~'equals [~this ~that]
-       (and (= (type ~this) (type ~that))
-            (= (.hashCode ~this) (.hashCode ~that))
-            ~@(gen-equals* this that arity)))))
+       (or (identical? ~this ~that)
+           (and (= (type ~this) (type ~that))
+                (= (.hashCode ~this) (.hashCode ~that))
+                ~@(gen-equals* this that arity))))))
 
 (defn- gen-type* [type javatype arity tagmap]
   (let [pred     (symbol (str type "?"))

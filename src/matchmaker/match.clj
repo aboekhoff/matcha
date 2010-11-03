@@ -126,7 +126,7 @@
   (let [[ps op len restpat] (parse-vector p)
         ps* (match-indexed t ps)]
     (if (empty? p)
-      (choose `(empty? ~t) yes no)
+      (choose `(and (sequential? ~t) (empty? ~t)) yes no)
       (choose `(and (sequential? ~t) (~op (count ~t) ~len))
        (if restpat
          (ps* (match-rest t restpat len yes no) no)
