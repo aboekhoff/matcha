@@ -11,7 +11,8 @@
 (def TYPE_PREFIX  "Structural")
 (def TAG          'structural_tag)
 (def META         'metadata)
-(def HASH_CODE    'computed_hash_code)
+(def HASH_CODE    (with-meta 'computed_hash_code
+                    {:unsynchronized-mutable true}))
 
 ;;;; helpers
 
@@ -42,7 +43,8 @@
      :javatype (::javatype target*)
      :arity    (::arity    target*)}))
 
-;;;; first figure out the max arity
+;;;; convert all constructor signatures
+;;;; into a vector of [constructor fields]
 
 (defn- normalize-spec [spec]
   (cond
@@ -65,7 +67,7 @@
   (let [nils  (repeat actual-arity nil)
         cname (with-meta cname {::ADT true
                                 ::arity 0})]
-    `(do (def ~cname (new ~javatype ~tag ~@nils nil))
+    `(do (def ~cname (new ~javatype ~tag ~@nils -1 nil))
          (alter-meta! (var ~cname) assoc ::javatype ~javatype))))
 
 (defn- gen-constructor*
@@ -79,7 +81,7 @@
         cname (with-meta cname meta)
         func  `(lambda [~@args]
                  ~@(gen-assertions fields args)
-                 (new ~javatype ~tag ~@args* nil))]
+                 (new ~javatype ~tag ~@args* -1 nil))]
     `(do (intern *ns* (quote ~cname) ~func)
          (alter-meta! (var ~cname) assoc ::javatype ~javatype))))
 
@@ -117,27 +119,27 @@
 (defn- gen-hash-code [javatype tagmap]
   (let [this 'this
         hash `(. ~this ~HASH_CODE)]
-    `(~'hashCode [this#]
-         (let [code# ~hash]
-           (or code#
-               (let [code# ~(gen-hash-code* this javatype tagmap)]
-                 (locking ~hash
-                   (set! ~this ~HASH_CODE code#))
-                 code#))))))
+    `(~'hashCode [~this]
+        (let [code# ~hash]
+           (if-not (== code# -1) code#
+             (let [code# ~(gen-hash-code* this javatype tagmap)]
+               (set! ~HASH_CODE code#)
+               code#))))))
 
 (defn- gen-equals* [this that arity]
   (let [fields (fieldnames arity)
         pairs  (map list
                     (projections this fields)
                     (projections that fields))]
+    
     (for [[a b] pairs]
-      `(.equals ~a ~b))))
+      `(= ~a ~b))))
 
 (defn- gen-equals [javatype arity]
   (let [this 'this that 'that]
-    `(equals [~this ~that]
-       (and (instance? ~javatype ~that)
-            (== (.hashCode ~this) (.hashCode ~that))
+    `(~'equals [~this ~that]
+       (and (= (type ~this) (type ~that))
+            (= (.hashCode ~this) (.hashCode ~that))
             ~@(gen-equals* this that arity)))))
 
 (defn- gen-type* [type javatype arity tagmap]
@@ -145,14 +147,18 @@
         this     'this
         metadata 'metadata
         fields   (fieldnames arity)]
-    `(do (deftype ~javatype [~TAG ~@fields ~META]
+    `(do (deftype ~javatype [~TAG ~@fields ~HASH_CODE ~META]
            clojure.lang.IObj
            (~'meta [~this] (or (. ~this ~META) nil))
            (~'withMeta [~this ~metadata]
              (new ~javatype
-               ~@(projections this (cons TAG fields)) ~metadata))
+               ~@(projections this (cons TAG fields))
+               (. ~this ~HASH_CODE)
+               ~metadata))
            java.lang.Object
-           ~(gen-to-string tagmap))
+           ~(gen-to-string tagmap)
+           ~(gen-hash-code javatype tagmap)
+           ~(gen-equals javatype arity))
          (defn ~pred [~'object]
            (instance? ~javatype ~'object))
          (def ~type ~tagmap))))
